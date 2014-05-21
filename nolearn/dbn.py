@@ -41,6 +41,7 @@ class DBN(BaseEstimator):
         loss_funct=None,
         minibatch_size=64,
         minibatches_per_epoch=None,
+        minibatches_per_epoch_pretrain=None,
 
         pretrain_callback=None,
         fine_tune_callback=None,
@@ -220,11 +221,18 @@ class DBN(BaseEstimator):
         self.use_dropout = True if dropouts else False
         self.minibatch_size = minibatch_size
         self.minibatches_per_epoch = minibatches_per_epoch
+        if minibatches_per_epoch_pretrain is None:
+            self.minibatches_per_epoch_pretrain = minibatches_per_epoch
+        else: 
+            self.minibatches_per_epoch_pretrain = minibatches_per_epoch_pretrain
 
         self.pretrain_callback = pretrain_callback
         self.fine_tune_callback = fine_tune_callback
         self.random_state = random_state
         self.verbose = verbose
+        
+        self.unsupervised_learning_done = False
+        
 
     def _fill_missing_layer_sizes(self, X, y):
         layer_sizes = self.layer_sizes
@@ -345,25 +353,21 @@ class DBN(BaseEstimator):
         if self.verbose >= 2:
             print "Learn rates: {}".format(self.net_.learnRates)
 
-    def fit(self, X, y):
+    def unsupervised_learning(self,X, y = None):
+
         if self.verbose:
-            print "[DBN] fitting X.shape=%s" % (X.shape,)
-        y = self._onehot(y)
-
+            print "[DBN] unsupervised learning X.shape=%s" % (X.shape,)
+        
+        if y is not None:
+            y = self._onehot(y)
         self.net_ = self._build_net(X, y)
-
-        minibatches_per_epoch = self.minibatches_per_epoch
-        if minibatches_per_epoch is None:
-            minibatches_per_epoch = X.shape[0] / self.minibatch_size
-
-        loss_funct = self.loss_funct
-        if loss_funct is None:
-            loss_funct = self._num_mistakes
-
+        
+        minibatches_per_epoch_pretrain = self.minibatches_per_epoch_pretrain
+        if minibatches_per_epoch_pretrain is None:
+            minibatches_per_epoch_pretrain = X.shape[0] / self.minibatch_size
+        
         errors_pretrain = self.errors_pretrain_ = []
-        losses_fine_tune = self.losses_fine_tune_ = []
-        errors_fine_tune = self.errors_fine_tune_ = []
-
+        
         if self.epochs_pretrain:
             self.epochs_pretrain = self._vp(self.epochs_pretrain)
             self._configure_net_pretrain(self.net_)
@@ -377,7 +381,7 @@ class DBN(BaseEstimator):
                         layer_index,
                         self._minibatches(X),
                         self.epochs_pretrain[layer_index],
-                        minibatches_per_epoch,
+                        minibatches_per_epoch_pretrain,
                         )):
                     errors_pretrain[-1].append(err)
                     if self.verbose:  # pragma: no cover
@@ -388,6 +392,29 @@ class DBN(BaseEstimator):
                     if self.pretrain_callback is not None:
                         self.pretrain_callback(
                             self, epoch + 1, layer_index)
+        
+        self.unsupervised_learning_done = True
+
+
+    def fit(self, X, y):
+        
+        if not self.unsupervised_learning_done:
+            self.unsupervised_learning(X, y)
+        
+        if self.verbose:
+            print "[DBN] fitting X.shape=%s" % (X.shape,)
+        y = self._onehot(y)
+
+        minibatches_per_epoch = self.minibatches_per_epoch
+        if minibatches_per_epoch is None:
+            minibatches_per_epoch = X.shape[0] / self.minibatch_size
+
+        loss_funct = self.loss_funct
+        if loss_funct is None:
+            loss_funct = self._num_mistakes
+
+        losses_fine_tune = self.losses_fine_tune_ = []
+        errors_fine_tune = self.errors_fine_tune_ = []
 
         self._configure_net_finetune(self.net_)
         if self.verbose:  # pragma: no cover
